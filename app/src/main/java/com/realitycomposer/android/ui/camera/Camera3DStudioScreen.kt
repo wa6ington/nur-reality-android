@@ -87,11 +87,12 @@ data class Camera3DObject(
     val screenXRatio: Float = 0.5f,
     val screenYRatio: Float = 0.48f,
     val sizePx: Float = 150f,
-    val rotX: Float = 20f,
-    val rotY: Float = -28f,
+    val rotX: Float = 12f,
+    val rotY: Float = -24f,
     val color: Color = Color(0xFF0A84FF),
     val text: String = "",
-    val textColor: Color = Color(0xFFFFD60A)
+    val textColor: Color = Color(0xFFE5E5EA),
+    val isVertical: Boolean = false
 )
 
 private data class DrawStroke(
@@ -621,7 +622,12 @@ fun Camera3DStudioScreen(
                                             if (selectedObj.color == col) Color.White else RcColors.Border,
                                             CircleShape
                                         )
-                                        .clickable { updateSelected { it.copy(color = col) } }
+                                        .clickable {
+                                            updateSelected {
+                                                if (it.shape == Camera3DShape.TEXT_3D) it.copy(textColor = col, color = col)
+                                                else it.copy(color = col)
+                                            }
+                                        }
                                 )
                             }
                         }
@@ -787,22 +793,37 @@ fun Camera3DStudioScreen(
 
         // 10. TEXT ON 3D OBJECT DIALOG
         if (showTextDialog && selectedObj != null) {
-            var textVal by remember(selectedObj.id) { mutableStateOf(selectedObj.text.ifBlank { "NUR ADVERTISING" }) }
+            var textVal by remember(selectedObj.id) { mutableStateOf(selectedObj.text.ifBlank { "NUR" }) }
             var textCol by remember(selectedObj.id) { mutableStateOf(selectedObj.textColor) }
+            var verticalMode by remember(selectedObj.id) { mutableStateOf(selectedObj.isVertical) }
             AlertDialog(
                 onDismissRequest = { showTextDialog = false },
                 containerColor = RcColors.Surface,
-                title = { Text("Текст на 3D-объекте", color = Color.White, fontWeight = FontWeight.Bold) },
+                title = { Text("3D-Буквы / Текст", color = Color.White, fontWeight = FontWeight.Bold) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedTextField(
                             value = textVal,
                             onValueChange = { textVal = it },
-                            label = { Text("Введите текст") },
+                            label = { Text("Введите текст (например: ТДН или NUR)") },
                             maxLines = 3,
                             modifier = Modifier.fillMaxWidth()
                         )
-                        Text("Цвет текста:", color = RcColors.TextSecondary, fontSize = 12.sp)
+                        if (selectedObj.shape == Camera3DShape.TEXT_3D) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(
+                                    selected = !verticalMode,
+                                    onClick = { verticalMode = false },
+                                    label = { Text("Горизонтально", fontSize = 12.sp) }
+                                )
+                                FilterChip(
+                                    selected = verticalMode,
+                                    onClick = { verticalMode = true },
+                                    label = { Text("Вертикально (ТДН)", fontSize = 12.sp) }
+                                )
+                            }
+                        }
+                        Text("Цвет букв:", color = RcColors.TextSecondary, fontSize = 12.sp)
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(StudioColors) { col ->
                                 Box(
@@ -824,7 +845,13 @@ fun Camera3DStudioScreen(
                 confirmButton = {
                     Button(
                         onClick = {
-                            updateSelected { it.copy(text = textVal.trim(), textColor = textCol) }
+                            updateSelected {
+                                it.copy(
+                                    text = textVal.trim(),
+                                    textColor = textCol,
+                                    isVertical = verticalMode
+                                )
+                            }
                             showTextDialog = false
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = RcColors.AccentBlue)
@@ -977,6 +1004,12 @@ private fun draw3DObjectToAndroidCanvas(
     val cy = obj.screenYRatio * viewportH
     val s = obj.sizePx
 
+    // Pure 3D Extruded Volumetric Letters (NO black box behind them!) — like ТДН / Aa!
+    if (obj.shape == Camera3DShape.TEXT_3D) {
+        drawPureExtruded3DLetters(canvas, obj, cx, cy, s)
+        return
+    }
+
     val faces = buildShapeMesh(obj.shape, obj.color)
 
     val radX = obj.rotX * PI.toFloat() / 180f
@@ -1093,6 +1126,99 @@ private fun draw3DObjectToAndroidCanvas(
             y += lineH
         }
     }
+}
+
+/**
+ * Draws pure volumetric 3D extruded letters with dark metallic side-walls (бортики)
+ * and NO background box — matching real façade signage (ТДН) and Apple Reality Composer (Aa).
+ */
+private fun drawPureExtruded3DLetters(
+    canvas: AndroidCanvas,
+    obj: Camera3DObject,
+    cx: Float,
+    cy: Float,
+    sizePx: Float
+) {
+    val rawText = obj.text.ifBlank { "NUR" }
+    val lines = if (obj.isVertical) {
+        rawText.replace("\n", "").take(8).map { it.toString() }
+    } else {
+        rawText.split("\n").take(3)
+    }
+
+    val maxLen = lines.maxOf { it.length }.coerceAtLeast(1)
+    val fontSize = if (obj.isVertical) {
+        (sizePx * 0.85f).coerceIn(48f, 260f)
+    } else {
+        (sizePx * 0.95f * (5f / maxLen.coerceAtLeast(3))).coerceIn(42f, 220f)
+    }
+
+    val radY = obj.rotY * PI.toFloat() / 180f
+    val radX = obj.rotX * PI.toFloat() / 180f
+
+    // 3D extrusion vector based on rotation/tilt sliders
+    val depthSteps = 16
+    val totalDepth = fontSize * 0.22f
+    val stepDx = (-sin(radY) * totalDepth / depthSteps).coerceIn(-6f, 6f)
+    val stepDy = (sin(radX) * totalDepth / depthSteps).coerceIn(-6f, 6f)
+
+    val lineH = fontSize * 1.05f
+    val totalH = lineH * lines.size
+
+    canvas.save()
+    canvas.translate(cx, cy)
+    // Perspective foreshortening & wall-angle skew
+    val scaleX = cos(radY).coerceIn(0.35f, 1.0f)
+    val scaleY = cos(radX).coerceIn(0.45f, 1.0f)
+    canvas.scale(scaleX, scaleY)
+    canvas.skew(0f, -sin(radY) * 0.22f)
+
+    // 1. Extruded dark metallic side-walls (бортики) from back to front
+    val sidePaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+        textSize = fontSize
+        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        textAlign = AndroidPaint.Align.CENTER
+        style = AndroidPaint.Style.FILL
+    }
+    for (step in depthSteps downTo 1) {
+        val shade = 36 + ((depthSteps - step) * 28 / depthSteps)
+        sidePaint.color = android.graphics.Color.rgb(shade, shade, shade + 6)
+        val ox = stepDx * step
+        val oy = stepDy * step
+        var y = -totalH / 2f + fontSize * 0.85f
+        for (line in lines) {
+            canvas.drawText(line, ox, y + oy, sidePaint)
+            y += lineH
+        }
+    }
+
+    // 2. Crisp dark outline around the front face (like fabricated signage edge)
+    val outlinePaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.argb(220, 20, 20, 24)
+        textSize = fontSize
+        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        textAlign = AndroidPaint.Align.CENTER
+        style = AndroidPaint.Style.STROKE
+        strokeWidth = (fontSize * 0.045f).coerceIn(2f, 8f)
+    }
+
+    // 3. Bright front face of the 3D letters
+    val facePaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+        color = obj.textColor.toArgb()
+        textSize = fontSize
+        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        textAlign = AndroidPaint.Align.CENTER
+        style = AndroidPaint.Style.FILL
+    }
+
+    var y = -totalH / 2f + fontSize * 0.85f
+    for (line in lines) {
+        canvas.drawText(line, 0f, y, facePaint)
+        canvas.drawText(line, 0f, y, outlinePaint)
+        y += lineH
+    }
+
+    canvas.restore()
 }
 
 private fun buildShapeMesh(shape: Camera3DShape, color: Color): List<MeshFace> {
