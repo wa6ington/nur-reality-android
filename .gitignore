@@ -11,5 +11,6 @@
 .cxx
 *.apk
 *.aab
+*.mp4
 *.keystore
 *.jks
