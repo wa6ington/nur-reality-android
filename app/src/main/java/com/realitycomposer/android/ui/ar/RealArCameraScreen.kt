@@ -95,7 +95,8 @@ private val ArPalette = listOf(
 @Composable
 fun RealArCameraScreen(
     onImportGlb: ((String) -> Unit) -> Unit,
-    onExportImage: (File, String) -> Unit
+    onExportImage: (File, String) -> Unit,
+    onArUnsupported: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -289,6 +290,9 @@ fun RealArCameraScreen(
                 config.lightEstimationMode = Config.LightEstimationMode.ENVIRONMENTAL_HDR
                 config.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
                 config.instantPlacementMode = Config.InstantPlacementMode.LOCAL_Y_UP
+            },
+            onSessionFailed = { _ ->
+                onArUnsupported()
             },
             onSessionUpdated = { session, frame ->
                 currentFrame = frame
