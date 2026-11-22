@@ -19,7 +19,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.realitycomposer.android.ui.scanner.ObjectScannerScreen
-import com.realitycomposer.android.ui.scanner.ScannedModelViewerScreen
 import com.realitycomposer.android.ui.screens.EditorScreen
 import com.realitycomposer.android.ui.theme.RealityComposerTheme
 import com.realitycomposer.android.viewmodel.EditorViewModel
@@ -65,18 +64,6 @@ class MainActivity : ComponentActivity() {
                             onExportCameraImage = { file, mime ->
                                 shareFile(file, mime, "Экспорт фото с камеры")
                             }
-                        )
-                    }
-
-                    state.activeScanViewer != null -> {
-                        val scan = state.activeScanViewer!!
-                        ScannedModelViewerScreen(
-                            scan = scan,
-                            onBackToProjects = vm::closeScannedObjectViewer,
-                            onExportObj = { file ->
-                                shareFile(file, "text/plain", "Экспорт 3D-модели (.OBJ)")
-                            },
-                            onOpenInArEditor = vm::closeScannedObjectViewer
                         )
                     }
 

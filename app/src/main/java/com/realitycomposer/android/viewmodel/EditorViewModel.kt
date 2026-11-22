@@ -109,13 +109,25 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun onScanCompleted(scan: ScannedObject) {
         viewModelScope.launch {
             val scans = captureEngine.loadAllScans()
+            val scannedObj = SceneObject(
+                name = scan.name,
+                type = ObjectType.SCANNED_3D,
+                objFilePath = scan.objFilePath,
+                scanPoints = scan.points,
+                position = Vec3(0f, 0.25f, 0f),
+                scale = Vec3(1.0f, 1.0f, 1.0f),
+                material = MaterialProperties(colorHex = 0xFFFFD60A)
+            )
+            mutateActiveScene { scene -> scene.copy(objects = scene.objects + scannedObj) }
             _uiState.update {
                 it.copy(
                     scannedObjects = scans,
                     isScanningObject = false,
-                    activeScanViewer = scan
+                    activeScanViewer = null,
+                    selectedObjectId = scannedObj.id
                 )
             }
+            showBanner("3D-модель создана и добавлена в камеру!")
         }
     }
 
@@ -346,6 +358,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             ObjectType.PLANE -> Vec3(0.6f, 0.02f, 0.6f)
             ObjectType.TEXT_3D -> Vec3(0.75f, 0.75f, 0.75f)
             ObjectType.DRAWING_3D -> Vec3(0.8f, 0.8f, 0.8f)
+            ObjectType.SCANNED_3D -> Vec3(1.0f, 1.0f, 1.0f)
             ObjectType.GLB_MODEL -> Vec3(0.35f, 0.35f, 0.35f)
         }
         val offsetX = ((_uiState.value.activeScene?.objects?.size ?: 0) % 4 - 1.5f) * 0.18f

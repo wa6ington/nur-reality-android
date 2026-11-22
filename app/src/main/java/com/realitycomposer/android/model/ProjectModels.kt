@@ -41,6 +41,7 @@ enum class ObjectType(val displayNameRu: String) {
     PLANE("Плоскость"),
     TEXT_3D("3D-Текст"),
     DRAWING_3D("3D-Рисунок"),
+    SCANNED_3D("3D-Скан"),
     GLB_MODEL("3D-Модель (GLB)")
 }
 
@@ -111,6 +112,8 @@ data class SceneObject(
     val type: ObjectType,
     val modelPath: String? = null,
     val imagePath: String? = null,
+    val objFilePath: String? = null,
+    val scanPoints: List<ColoredPoint3D> = emptyList(),
     val textContent: String = "Привет AR!",
     val labelText: String = "",
     val labelColorHex: Long = 0xFFFFFFFF,

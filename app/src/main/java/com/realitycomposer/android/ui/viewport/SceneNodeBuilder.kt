@@ -151,6 +151,35 @@ object SceneNodeBuilder {
                 }
             }
 
+            ObjectType.SCANNED_3D -> {
+                Node(engine).apply {
+                    val pts = obj.scanPoints
+                    if (pts.isEmpty()) {
+                        addChildNode(CubeNode(engine, Size(0.5f, 0.5f, 0.5f), materialInstance = mat))
+                    } else {
+                        // Uniformly sample up to 140 surface voxels for silky 60fps PBR rendering in Camera
+                        val step = (pts.size / 140).coerceAtLeast(1)
+                        val voxelSize = Size(0.065f, 0.065f, 0.065f)
+                        var i = 0
+                        while (i < pts.size) {
+                            val p = pts[i]
+                            val vMat = materialLoader.createColorInstance(
+                                color = Color(p.argb),
+                                metallic = 0.05f,
+                                roughness = 0.65f,
+                                reflectance = 0.35f
+                            )
+                            addChildNode(
+                                CubeNode(engine, size = voxelSize, materialInstance = vMat).apply {
+                                    position = Position(p.x * 1.4f, p.y * 1.4f, p.z * 1.4f)
+                                }
+                            )
+                            i += step
+                        }
+                    }
+                }
+            }
+
             ObjectType.GLB_MODEL -> {
                 val path = obj.modelPath
                 val file = if (path != null) File(path) else null
