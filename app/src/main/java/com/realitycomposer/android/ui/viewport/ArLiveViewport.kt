@@ -290,7 +290,7 @@ private fun RealArCoreScene(
             }
         }
         scene.objects.forEach { obj ->
-            val key = "${obj.type}|${obj.modelPath}|${obj.imagePath}|${obj.textContent}|${obj.material.colorHex}|${obj.material.metallic}|${obj.material.roughness}"
+            val key = "${obj.type}|${obj.modelPath}|${obj.imagePath}|${obj.textContent}|${obj.labelText}|${obj.labelColorHex}|${obj.material.colorHex}|${obj.material.metallic}|${obj.material.roughness}"
             val existing = objectNodes[obj.id]
             if (existing == null || existing.second != key) {
                 existing?.first?.let { old ->

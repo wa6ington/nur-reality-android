@@ -112,6 +112,8 @@ data class SceneObject(
     val modelPath: String? = null,
     val imagePath: String? = null,
     val textContent: String = "Привет AR!",
+    val labelText: String = "",
+    val labelColorHex: Long = 0xFFFFFFFF,
     val position: Vec3 = Vec3(0f, 0.15f, 0f),
     val rotation: Vec3 = Vec3.ZERO,
     val scale: Vec3 = Vec3.ONE,

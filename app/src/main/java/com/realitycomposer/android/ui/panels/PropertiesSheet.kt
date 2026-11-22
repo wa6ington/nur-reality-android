@@ -131,7 +131,7 @@ fun PropertiesSheet(
                 }
             }
 
-            // Text content editor for 3D-Text objects
+            // Text content editor for 3D-Text OR Text Label on ANY 3D object!
             if (selectedObject.type == ObjectType.TEXT_3D) {
                 InspectorSectionCard(title = "Содержимое 3D-текста") {
                     OutlinedTextField(
@@ -154,6 +154,59 @@ fun PropertiesSheet(
                         color = RcColors.TextSecondary,
                         fontSize = 11.sp
                     )
+                }
+            } else {
+                InspectorSectionCard(title = "Текст на этом 3D-объекте") {
+                    OutlinedTextField(
+                        value = selectedObject.labelText,
+                        onValueChange = { txt ->
+                            onUpdateObject(false) { it.copy(labelText = txt) }
+                        },
+                        placeholder = { Text("Например: NUR ADVERTISING", fontSize = 12.sp) },
+                        label = { Text("Надпись прямо на объекте", fontSize = 11.sp) },
+                        maxLines = 3,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = RcColors.AccentBlue,
+                            unfocusedBorderColor = RcColors.Border,
+                            focusedTextColor = RcColors.TextPrimary,
+                            unfocusedTextColor = RcColors.TextPrimary
+                        )
+                    )
+                    if (selectedObject.labelText.isNotBlank()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Цвет надписи", color = RcColors.TextSecondary, fontSize = 12.sp)
+                            TextButton(
+                                onClick = { onUpdateObject(true) { it.copy(labelText = "") } },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                            ) {
+                                Text("Убрать текст", color = RcColors.DangerRed, fontSize = 11.sp)
+                            }
+                        }
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(ColorPalette) { hex ->
+                                val isSelected = selectedObject.labelColorHex == hex
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(hex))
+                                        .border(
+                                            width = if (isSelected) 2.5.dp else 1.dp,
+                                            color = if (isSelected) Color.White else RcColors.Border,
+                                            shape = CircleShape
+                                        )
+                                        .clickable {
+                                            onUpdateObject(true) { it.copy(labelColorHex = hex) }
+                                        }
+                                )
+                            }
+                        }
+                    }
                 }
             }
 

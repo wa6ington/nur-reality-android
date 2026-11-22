@@ -356,6 +356,35 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addStarterPrefab(prefabKey: String) {
         val newObjects = when (prefabKey) {
+            "billboard" -> listOf(
+                SceneObject(
+                    name = "Экран билборда",
+                    type = ObjectType.CUBE,
+                    position = Vec3(0f, 0.56f, 0f),
+                    scale = Vec3(0.85f, 0.45f, 0.06f),
+                    labelText = "NUR ADVERTISING",
+                    labelColorHex = 0xFFFFD60A,
+                    material = MaterialProperties(colorHex = 0xFF1C1C1E, preset = MaterialPreset.GLOSSY, roughness = 0.2f)
+                ),
+                SceneObject(
+                    name = "Стойка билборда",
+                    type = ObjectType.CYLINDER,
+                    position = Vec3(0f, 0.17f, 0f),
+                    scale = Vec3(0.08f, 0.34f, 0.08f),
+                    material = MaterialProperties(colorHex = 0xFF48484A, preset = MaterialPreset.METAL, metallic = 0.9f, roughness = 0.25f)
+                )
+            )
+            "branded_cube" -> listOf(
+                SceneObject(
+                    name = "Куб с текстом",
+                    type = ObjectType.CUBE,
+                    position = Vec3(0f, 0.2f, 0f),
+                    scale = Vec3(0.4f, 0.4f, 0.4f),
+                    labelText = "NUR",
+                    labelColorHex = 0xFFFFD60A,
+                    material = MaterialProperties(colorHex = 0xFF0A84FF, preset = MaterialPreset.GLOSSY, roughness = 0.2f)
+                )
+            )
             "arch" -> listOf(
                 SceneObject(
                     name = "Арка (Левая колонна)",

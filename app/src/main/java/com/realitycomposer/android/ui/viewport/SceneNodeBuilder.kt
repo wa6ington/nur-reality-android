@@ -175,6 +175,28 @@ object SceneNodeBuilder {
 
         visualChild.name = obj.id
         root.addChildNode(visualChild)
+
+        // Attach crisp 3D text label directly onto ANY 3D object (Cube, Sphere, Cylinder, GLB, etc.)
+        if (obj.type != ObjectType.TEXT_3D && obj.labelText.isNotBlank()) {
+            val labelBmp = renderObjectLabelBitmap(
+                text = obj.labelText,
+                textColorArgb = obj.labelColorHex.toInt()
+            )
+            val labelZ = when (obj.type) {
+                ObjectType.PLANE -> 0.08f
+                else -> 0.52f
+            }
+            val labelNode = ImageNode(
+                materialLoader = materialLoader,
+                bitmap = labelBmp,
+                size = Size(0.92f, 0.46f, 0.0f)
+            ).apply {
+                name = obj.id
+                position = Position(0f, 0f, labelZ)
+            }
+            root.addChildNode(labelNode)
+        }
+
         return root
     }
 
@@ -389,6 +411,53 @@ object SceneNodeBuilder {
             y += lineHeight
         }
 
+        return bmp
+    }
+
+    private fun renderObjectLabelBitmap(text: String, textColorArgb: Int): Bitmap {
+        val width = 1024
+        val height = 512
+        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+
+        // Semi-transparent subtle pill backdrop so text is crisp on any 3D object color
+        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.argb(185, 14, 14, 18)
+            style = Paint.Style.FILL
+        }
+        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = textColorArgb
+            style = Paint.Style.STROKE
+            strokeWidth = 10f
+        }
+        val rect = RectF(32f, 64f, width - 32f, height - 64f)
+        canvas.drawRoundRect(rect, 44f, 44f, bgPaint)
+        canvas.drawRoundRect(rect, 44f, 44f, borderPaint)
+
+        val lines = text.split("\n").take(3).ifEmpty { listOf(text) }
+        val maxLen = lines.maxOf { it.length }.coerceAtLeast(1)
+        val textSizePx = when {
+            maxLen <= 6 && lines.size == 1 -> 150f
+            maxLen <= 12 && lines.size == 1 -> 112f
+            maxLen <= 20 -> 78f
+            else -> 58f
+        }
+
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = textColorArgb
+            textSize = textSizePx
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+            setShadowLayer(10f, 0f, 3f, android.graphics.Color.argb(200, 0, 0, 0))
+        }
+
+        val lineHeight = textSizePx * 1.18f
+        val totalHeight = lineHeight * lines.size
+        var y = (height - totalHeight) / 2f + textSizePx * 0.84f
+        for (line in lines) {
+            canvas.drawText(line, width / 2f, y, textPaint)
+            y += lineHeight
+        }
         return bmp
     }
 }

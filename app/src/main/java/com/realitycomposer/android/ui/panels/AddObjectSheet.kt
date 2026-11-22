@@ -52,6 +52,8 @@ fun AddObjectSheet(
     )
 
     val prefabs = listOf(
+        LibraryItem("Билборд", Icons.Default.FeaturedVideo) { onAddPrefab("billboard") },
+        LibraryItem("Куб + Текст", Icons.Default.Inventory2) { onAddPrefab("branded_cube") },
         LibraryItem("Арка", Icons.Default.AccountBalance) { onAddPrefab("arch") },
         LibraryItem("Стол", Icons.Default.TableRestaurant) { onAddPrefab("table") },
         LibraryItem("Маяк", Icons.Default.CellTower) { onAddPrefab("lighthouse") }
@@ -116,15 +118,8 @@ fun AddObjectSheet(
             items(primitives) { item ->
                 LibraryTile(item)
             }
-            item {
-                // Visual separator tile for prefabs or we include prefabs right after
-                LibraryTile(prefabs[0])
-            }
-            item {
-                LibraryTile(prefabs[1])
-            }
-            item {
-                LibraryTile(prefabs[2])
+            items(prefabs) { item ->
+                LibraryTile(item)
             }
         }
     }
