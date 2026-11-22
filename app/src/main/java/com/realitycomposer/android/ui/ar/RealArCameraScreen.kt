@@ -58,6 +58,7 @@ import com.realitycomposer.android.ui.theme.RcColors
 import io.github.sceneview.ar.ARScene
 import io.github.sceneview.ar.node.AnchorNode
 import io.github.sceneview.ar.rememberARCameraNode
+import io.github.sceneview.math.Position
 import io.github.sceneview.math.Rotation
 import io.github.sceneview.math.Scale
 import io.github.sceneview.node.Node
@@ -137,9 +138,10 @@ fun RealArCameraScreen(
     var selectedItemId by remember { mutableStateOf<String?>(null) }
     val selectedItem = placedItems.firstOrNull { it.id == selectedItemId }
 
-    // Next object kind to place on tap (defaults to 3D extruded "Aa" just like the video!)
+    // Next object kind to place on tap (defaults to 3D volumetric signage "NUR")
     var pendingKind by remember { mutableStateOf(ArObjectKind.TEXT_3D) }
-    var pendingText by remember { mutableStateOf("Aa") }
+    var pendingText by remember { mutableStateOf("NUR") }
+    var pendingVertical by remember { mutableStateOf(false) }
     var pendingGlbPath by remember { mutableStateOf<String?>(null) }
     var showPlanes by remember { mutableStateOf(true) }
 
@@ -170,6 +172,7 @@ fun RealArCameraScreen(
             item = item,
             showSelectionRing = (item.id == selectedItemId)
         ).apply {
+            position = Position(0f, item.offsetY, 0f)
             scale = Scale(item.scale)
             rotation = Rotation(0f, item.rotationY, 0f)
         }
@@ -186,6 +189,7 @@ fun RealArCameraScreen(
             rebuildVisualForItem(updated)
         } else {
             visualNodesMap[updated.id]?.apply {
+                position = Position(0f, updated.offsetY, 0f)
                 scale = Scale(updated.scale)
                 rotation = Rotation(0f, updated.rotationY, 0f)
             }
@@ -319,19 +323,20 @@ fun RealArCameraScreen(
                         return@rememberOnGestureListener
                     }
 
-                    // Otherwise place a new 3D object anchored in real 6DoF space on the desk/floor!
+                    // Otherwise place a new 3D object anchored in real 6DoF space on wall/desk/façade!
                     val frame = currentFrame ?: return@rememberOnGestureListener
                     val hitResult = frame.hitTest(motionEvent).firstOrNull { result ->
                         val trackable = result.trackable
                         trackable is Plane && trackable.isPoseInPolygon(result.hitPose)
-                    } ?: frame.hitTestInstantPlacement(motionEvent.x, motionEvent.y, 1.2f).firstOrNull()
+                    } ?: frame.hitTestInstantPlacement(motionEvent.x, motionEvent.y, 2.8f).firstOrNull()
 
                     if (hitResult != null) {
                         val newItem = PlacedArItem(
                             id = UUID.randomUUID().toString(),
                             kind = pendingKind,
                             text = if (pendingKind == ArObjectKind.TEXT_3D) pendingText else "",
-                            colorHex = if (pendingKind == ArObjectKind.TEXT_3D) 0xFFB8B8BE else 0xFF0A84FF,
+                            isVertical = pendingVertical,
+                            colorHex = if (pendingKind == ArObjectKind.TEXT_3D) 0xFFE5E5EA else 0xFF0A84FF,
                             modelPath = pendingGlbPath
                         )
                         val anchorNode = AnchorNode(engine, hitResult.createAnchor()).apply {
@@ -551,7 +556,7 @@ fun RealArCameraScreen(
             }
         }
 
-        // 7. Selected Object Properties Bar (Color, Size, Rotate Y)
+        // 7. Selected Object Properties Bar (Layout, Face Color, Size up to Building Scale, Height, Depth, Rotate Y)
         if (showEditPanel && selectedItem != null && !isDrawMode) {
             Column(
                 modifier = Modifier
@@ -559,7 +564,7 @@ fun RealArCameraScreen(
                     .fillMaxWidth()
                     .padding(12.dp)
                     .clip(RoundedCornerShape(18.dp))
-                    .background(Color(0xE01C1C1E))
+                    .background(Color(0xE61C1C1E))
                     .border(1.dp, RcColors.Border, RoundedCornerShape(18.dp))
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -569,9 +574,22 @@ fun RealArCameraScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Настройка 3D-объекта", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    TextButton(onClick = { showTextDialog = true }) {
-                        Text("Изменить текст", color = Color(0xFFFFD60A), fontSize = 12.sp)
+                    Text("Настройка 3D-вывески", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (selectedItem.kind == ArObjectKind.TEXT_3D) {
+                            FilterChip(
+                                selected = selectedItem.isVertical,
+                                onClick = {
+                                    updateSelectedItem(rebuildMesh = true) { it.copy(isVertical = !it.isVertical) }
+                                },
+                                label = {
+                                    Text(if (selectedItem.isVertical) "Вертикально" else "Горизонтально", fontSize = 11.sp)
+                                }
+                            )
+                        }
+                        TextButton(onClick = { showTextDialog = true }) {
+                            Text("Текст", color = Color(0xFFFFD60A), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -579,7 +597,7 @@ fun RealArCameraScreen(
                         val active = selectedItem.colorHex == hex
                         Box(
                             modifier = Modifier
-                                .size(30.dp)
+                                .size(28.dp)
                                 .clip(CircleShape)
                                 .background(Color(hex))
                                 .border(if (active) 2.5.dp else 1.dp, if (active) RcColors.AccentBlue else RcColors.Border, CircleShape)
@@ -588,22 +606,42 @@ fun RealArCameraScreen(
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Размер", color = RcColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.width(64.dp))
+                    Text("Размер", color = RcColors.TextSecondary, fontSize = 11.sp, modifier = Modifier.width(64.dp))
                     Slider(
                         value = selectedItem.scale,
                         onValueChange = { s -> updateSelectedItem(rebuildMesh = false) { it.copy(scale = s) } },
-                        valueRange = 0.3f..3.0f,
-                        modifier = Modifier.weight(1f).height(26.dp)
+                        valueRange = 0.3f..15.0f,
+                        modifier = Modifier.weight(1f).height(24.dp)
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Поворот", color = RcColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.width(64.dp))
+                    Text("Высота", color = RcColors.TextSecondary, fontSize = 11.sp, modifier = Modifier.width(64.dp))
+                    Slider(
+                        value = selectedItem.offsetY,
+                        onValueChange = { y -> updateSelectedItem(rebuildMesh = false) { it.copy(offsetY = y) } },
+                        valueRange = -1.0f..6.0f,
+                        modifier = Modifier.weight(1f).height(24.dp)
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Поворот", color = RcColors.TextSecondary, fontSize = 11.sp, modifier = Modifier.width(64.dp))
                     Slider(
                         value = selectedItem.rotationY,
                         onValueChange = { r -> updateSelectedItem(rebuildMesh = false) { it.copy(rotationY = r) } },
                         valueRange = -180f..180f,
-                        modifier = Modifier.weight(1f).height(26.dp)
+                        modifier = Modifier.weight(1f).height(24.dp)
                     )
+                }
+                if (selectedItem.kind == ArObjectKind.TEXT_3D) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Толщина", color = RcColors.TextSecondary, fontSize = 11.sp, modifier = Modifier.width(64.dp))
+                        Slider(
+                            value = selectedItem.extrudeDepth,
+                            onValueChange = { d -> updateSelectedItem(rebuildMesh = true) { it.copy(extrudeDepth = d) } },
+                            valueRange = 0.01f..0.12f,
+                            modifier = Modifier.weight(1f).height(24.dp)
+                        )
+                    }
                 }
             }
         }
@@ -680,32 +718,50 @@ fun RealArCameraScreen(
             }
         }
 
-        // 9. Text Input Dialog (Edits selected 3D object OR sets next 3D Text to place!)
+        // 9. Text Input Dialog (Edits selected 3D signage OR sets next 3D signage to place!)
         if (showTextDialog) {
             var input by remember { mutableStateOf(selectedItem?.text?.ifBlank { pendingText } ?: pendingText) }
+            var verticalMode by remember { mutableStateOf(selectedItem?.isVertical ?: pendingVertical) }
             AlertDialog(
                 onDismissRequest = { showTextDialog = false },
                 containerColor = RcColors.Surface,
-                title = { Text("3D-Текст в пространстве", color = Color.White, fontWeight = FontWeight.Bold) },
+                title = { Text("3D-Вывеска на фасад", color = Color.White, fontWeight = FontWeight.Bold) },
                 text = {
-                    OutlinedTextField(
-                        value = input,
-                        onValueChange = { input = it },
-                        label = { Text("Введите текст (например: Aa или NUR)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            label = { Text("Текст (например: ТДН или NUR)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = !verticalMode,
+                                onClick = { verticalMode = false },
+                                label = { Text("Горизонтально", fontSize = 12.sp) }
+                            )
+                            FilterChip(
+                                selected = verticalMode,
+                                onClick = { verticalMode = true },
+                                label = { Text("Вертикально (ТДН)", fontSize = 12.sp) }
+                            )
+                        }
+                    }
                 },
                 confirmButton = {
                     Button(
                         onClick = {
-                            val clean = input.trim().ifBlank { "Aa" }
+                            val clean = input.trim().ifBlank { "NUR" }
                             pendingText = clean
+                            pendingVertical = verticalMode
                             if (selectedItem != null) {
-                                updateSelectedItem(rebuildMesh = true) { it.copy(text = clean) }
+                                updateSelectedItem(rebuildMesh = true) {
+                                    it.copy(text = clean, isVertical = verticalMode)
+                                }
                             } else {
                                 pendingKind = ArObjectKind.TEXT_3D
-                                toastMsg = "Текст «$clean» готов — нажмите на стол!"
+                                toastMsg = "Вывеска «$clean» готова — нажмите на стену!"
                             }
                             showTextDialog = false
                         },

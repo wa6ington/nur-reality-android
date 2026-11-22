@@ -21,7 +21,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 enum class ArObjectKind(val titleRu: String) {
-    TEXT_3D("3D-Текст"),
+    TEXT_3D("3D-Вывеска"),
     CUBE("Куб"),
     SPHERE("Сфера"),
     CYLINDER("Цилиндр"),
@@ -32,21 +32,21 @@ enum class ArObjectKind(val titleRu: String) {
 data class PlacedArItem(
     val id: String,
     val kind: ArObjectKind,
-    val text: String = "Aa",
-    val colorHex: Long = 0xFFB8B8BE,
+    val text: String = "NUR",
+    val isVertical: Boolean = false,
+    val colorHex: Long = 0xFFE5E5EA,      // Front face color
+    val sideColorHex: Long = 0xFF232328,  // Contrasting 3D side-wall (бортик) color
     val scale: Float = 1.0f,
+    val extrudeDepth: Float = 0.032f,
+    val offsetY: Float = 0f,              // Raise up onto building façade!
     val rotationY: Float = 0f,
-    val metallic: Float = 0.25f,
-    val roughness: Float = 0.42f,
+    val metallic: Float = 0.35f,
+    val roughness: Float = 0.32f,
     val modelPath: String? = null
 )
 
 object Extruded3DTextBuilder {
 
-    /**
-     * Builds a real 3D extruded solid object standing on y = 0 (table surface),
-     * matching Apple Reality Composer's 3D extruded "Aa" text and primitives.
-     */
     fun buildArObjectNode(
         engine: Engine,
         materialLoader: MaterialLoader,
@@ -62,39 +62,45 @@ object Extruded3DTextBuilder {
             color = Color(item.colorHex),
             metallic = item.metallic,
             roughness = item.roughness,
-            reflectance = 0.55f
+            reflectance = 0.6f
         )
 
         when (item.kind) {
             ArObjectKind.TEXT_3D -> {
-                val textNode = buildExtrudedTextNode(
+                val textNode = buildVolumetricSignageNode(
                     engine = engine,
                     materialLoader = materialLoader,
-                    text = item.text.ifBlank { "Aa" },
-                    colorHex = item.colorHex,
+                    text = item.text.ifBlank { "NUR" },
+                    isVertical = item.isVertical,
+                    faceColorHex = item.colorHex,
+                    sideColorHex = item.sideColorHex,
                     metallic = item.metallic,
-                    roughness = item.roughness
+                    roughness = item.roughness,
+                    targetCharHeight = 0.16f,
+                    extrudeDepthMeters = item.extrudeDepth
                 )
                 container.addChildNode(textNode)
             }
 
             ArObjectKind.CUBE -> {
-                val size = 0.14f
+                val size = 0.18f
                 container.addChildNode(
                     CubeNode(engine, Size(size, size, size), materialInstance = mat).apply {
                         position = Position(0f, size / 2f, 0f)
                     }
                 )
                 if (item.text.isNotBlank()) {
-                    val label = buildExtrudedTextNode(
+                    val label = buildVolumetricSignageNode(
                         engine = engine,
                         materialLoader = materialLoader,
                         text = item.text,
-                        colorHex = 0xFFFFD60A,
-                        metallic = 0.2f,
+                        isVertical = false,
+                        faceColorHex = 0xFFFFD60A,
+                        sideColorHex = 0xFF232328,
+                        metallic = 0.3f,
                         roughness = 0.3f,
-                        targetHeightMeters = 0.055f,
-                        extrudeDepthMeters = 0.01f
+                        targetCharHeight = 0.06f,
+                        extrudeDepthMeters = 0.014f
                     ).apply {
                         position = Position(0f, size + 0.01f, 0f)
                     }
@@ -103,60 +109,30 @@ object Extruded3DTextBuilder {
             }
 
             ArObjectKind.SPHERE -> {
-                val r = 0.08f
+                val r = 0.1f
                 container.addChildNode(
                     SphereNode(engine, radius = r, materialInstance = mat).apply {
                         position = Position(0f, r, 0f)
                     }
                 )
-                if (item.text.isNotBlank()) {
-                    val label = buildExtrudedTextNode(
-                        engine = engine,
-                        materialLoader = materialLoader,
-                        text = item.text,
-                        colorHex = 0xFFFFD60A,
-                        metallic = 0.2f,
-                        roughness = 0.3f,
-                        targetHeightMeters = 0.05f,
-                        extrudeDepthMeters = 0.01f
-                    ).apply {
-                        position = Position(0f, r * 2f + 0.015f, 0f)
-                    }
-                    container.addChildNode(label)
-                }
             }
 
             ArObjectKind.CYLINDER -> {
-                val r = 0.075f
-                val h = 0.16f
+                val r = 0.09f
+                val h = 0.2f
                 container.addChildNode(
                     CylinderNode(engine, radius = r, height = h, materialInstance = mat).apply {
                         position = Position(0f, h / 2f, 0f)
                     }
                 )
-                if (item.text.isNotBlank()) {
-                    val label = buildExtrudedTextNode(
-                        engine = engine,
-                        materialLoader = materialLoader,
-                        text = item.text,
-                        colorHex = 0xFFFFD60A,
-                        metallic = 0.2f,
-                        roughness = 0.3f,
-                        targetHeightMeters = 0.05f,
-                        extrudeDepthMeters = 0.01f
-                    ).apply {
-                        position = Position(0f, h + 0.015f, 0f)
-                    }
-                    container.addChildNode(label)
-                }
             }
 
             ArObjectKind.CONE -> {
                 val steps = 10
-                val totalH = 0.18f
+                val totalH = 0.22f
                 val segH = totalH / steps
                 for (i in 0 until steps) {
-                    val radius = (0.085f * (1f - i.toFloat() / steps)).coerceAtLeast(0.006f)
+                    val radius = (0.1f * (1f - i.toFloat() / steps)).coerceAtLeast(0.008f)
                     container.addChildNode(
                         CylinderNode(engine, radius = radius, height = segH * 1.05f, materialInstance = mat).apply {
                             position = Position(0f, segH * (i + 0.5f), 0f)
@@ -172,20 +148,19 @@ object Extruded3DTextBuilder {
                 } else null
                 if (instance != null) {
                     container.addChildNode(
-                        ModelNode(modelInstance = instance, scaleToUnits = 0.22f)
+                        ModelNode(modelInstance = instance, scaleToUnits = 0.35f)
                     )
                 } else {
                     container.addChildNode(
-                        CubeNode(engine, Size(0.14f, 0.14f, 0.14f), materialInstance = mat).apply {
-                            position = Position(0f, 0.07f, 0f)
+                        CubeNode(engine, Size(0.18f, 0.18f, 0.18f), materialInstance = mat).apply {
+                            position = Position(0f, 0.09f, 0f)
                         }
                     )
                 }
             }
         }
 
-        // Subtle ground selection ring on the table (just like Apple Reality Composer in the video!)
-        if (showSelectionRing) {
+        if (showSelectionRing && item.offsetY <= 0.04f) {
             container.addChildNode(buildGroundRingNode(engine, materialLoader))
         }
 
@@ -193,37 +168,49 @@ object Extruded3DTextBuilder {
     }
 
     /**
-     * Converts ANY Russian/English string into real 3D solid extruded geometry
-     * using greedy horizontal run-length merged PBR bars with real depth & lighting.
+     * Builds realistic two-tone 3D volumetric outdoor signage letters (объёмные фасадные буквы)
+     * supporting BOTH Horizontal ("NUR") and Vertical ("Т\nД\nН") layouts,
+     * with contrasting dark side-walls (бортики) and bright front face!
      */
-    fun buildExtrudedTextNode(
+    fun buildVolumetricSignageNode(
         engine: Engine,
         materialLoader: MaterialLoader,
         text: String,
-        colorHex: Long,
+        isVertical: Boolean,
+        faceColorHex: Long,
+        sideColorHex: Long,
         metallic: Float,
         roughness: Float,
-        targetHeightMeters: Float = 0.12f,
-        extrudeDepthMeters: Float = 0.018f
+        targetCharHeight: Float = 0.16f,
+        extrudeDepthMeters: Float = 0.032f
     ): Node {
-        val cleanText = text.trim().take(16).ifBlank { "Aa" }
-        val fontSizePx = 38f
+        val cleanText = text.trim().take(14).ifBlank { "NUR" }
+        val lines = if (isVertical) {
+            cleanText.replace("\n", "").map { it.toString() }
+        } else {
+            cleanText.split("\n").take(3)
+        }
 
+        val fontSizePx = if (isVertical) 30f else 34f
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.WHITE
             textSize = fontSizePx
-            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
         }
 
         val fm = paint.fontMetrics
-        val textW = paint.measureText(cleanText).toInt().coerceIn(24, 320)
-        val textH = (fm.descent - fm.ascent).toInt().coerceIn(24, 64)
+        val lineH = (fm.descent - fm.ascent).toInt().coerceAtLeast(24)
+        val maxLineW = lines.maxOf { paint.measureText(it).toInt() }.coerceIn(24, 280)
+        val totalH = (lineH * lines.size + 8).coerceIn(28, 320)
 
-        val bmp = Bitmap.createBitmap(textW + 6, textH + 4, Bitmap.Config.ARGB_8888)
+        val bmp = Bitmap.createBitmap(maxLineW + 10, totalH, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
-        canvas.drawText(cleanText, 3f, -fm.ascent + 2f, paint)
+        lines.forEachIndexed { idx, line ->
+            val y = idx * lineH - fm.ascent + 4f
+            canvas.drawText(line, bmp.width / 2f, y, paint)
+        }
 
-        // Find tight bounding box of non-transparent pixels
         var minX = bmp.width
         var maxX = 0
         var minY = bmp.height
@@ -240,21 +227,31 @@ object Extruded3DTextBuilder {
         }
 
         val root = Node(engine)
-        if (maxX < minX || maxY < minY) return root
+        if (maxX < minX || maxY < minY) {
+            bmp.recycle()
+            return root
+        }
 
-        val mat = materialLoader.createColorInstance(
-            color = Color(colorHex),
+        val sideMat = materialLoader.createColorInstance(
+            color = Color(sideColorHex),
+            metallic = 0.55f,
+            roughness = 0.35f,
+            reflectance = 0.5f
+        )
+        val faceMat = materialLoader.createColorInstance(
+            color = Color(faceColorHex),
             metallic = metallic,
             roughness = roughness,
-            reflectance = 0.6f
+            reflectance = 0.7f
         )
 
-        val contentH = (maxY - minY + 1).toFloat()
-        val contentW = (maxX - minX + 1).toFloat()
-        val pixelSize = targetHeightMeters / contentH
+        val pixelSize = targetCharHeight / lineH.toFloat()
         val centerX = (minX + maxX) / 2f
+        val frontCapDepth = (extrudeDepthMeters * 0.14f).coerceAtLeast(0.004f)
 
-        // Greedy horizontal run-length extrusion: each continuous lit span becomes one crisp 3D bar
+        // Greedy horizontal run-length extrusion with 2-layer volumetric signage look:
+        // 1) Deep dark side-wall body (бортик)
+        // 2) Bright front face cap (лицевая часть вывески)
         for (y in minY..maxY) {
             var x = minX
             while (x <= maxX) {
@@ -265,17 +262,29 @@ object Extruded3DTextBuilder {
                     }
                     val runLen = x - runStart
                     val barW = runLen * pixelSize
-                    val barH = pixelSize * 1.08f
+                    val barH = pixelSize * 1.1f
                     val posX = ((runStart + runLen / 2f - 0.5f) - centerX) * pixelSize
                     val posY = (maxY - y + 0.5f) * pixelSize
 
+                    // Side-wall extruded body
                     root.addChildNode(
                         CubeNode(
                             engine = engine,
                             size = Size(barW, barH, extrudeDepthMeters),
-                            materialInstance = mat
+                            materialInstance = sideMat
                         ).apply {
                             position = Position(posX, posY, 0f)
+                        }
+                    )
+
+                    // Bright front face cap
+                    root.addChildNode(
+                        CubeNode(
+                            engine = engine,
+                            size = Size(barW * 0.96f, barH * 0.96f, frontCapDepth),
+                            materialInstance = faceMat
+                        ).apply {
+                            position = Position(posX, posY, extrudeDepthMeters / 2f + frontCapDepth * 0.35f)
                         }
                     )
                 } else {
@@ -296,8 +305,8 @@ object Extruded3DTextBuilder {
             roughness = 0.7f,
             reflectance = 0.2f
         )
-        val segs = 28
-        val radius = 0.062f
+        val segs = 24
+        val radius = 0.07f
         val segLen = (2.0 * PI * radius / segs).toFloat() * 1.15f
         for (i in 0 until segs) {
             val angle = (i * 2.0 * PI / segs).toFloat()
