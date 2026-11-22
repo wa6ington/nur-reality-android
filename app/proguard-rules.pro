@@ -1,0 +1,4 @@
+-keepattributes *Annotation*
+-keep class com.realitycomposer.android.model.** { *; }
+-keep class com.google.ar.** { *; }
+-keep class com.google.android.filament.** { *; }
