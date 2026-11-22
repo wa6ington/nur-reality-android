@@ -7,15 +7,20 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.realitycomposer.android.ui.drawing.DrawingStudioScreen
 import com.realitycomposer.android.ui.scanner.ObjectScannerScreen
 import com.realitycomposer.android.ui.scanner.ScannedModelViewerScreen
 import com.realitycomposer.android.ui.screens.EditorScreen
-import com.realitycomposer.android.ui.screens.ProjectsScreen
 import com.realitycomposer.android.ui.theme.RealityComposerTheme
 import com.realitycomposer.android.viewmodel.EditorViewModel
 import java.io.File
@@ -53,19 +58,6 @@ class MainActivity : ComponentActivity() {
                 }
 
                 when {
-                    state.isDrawingStudioOpen -> {
-                        DrawingStudioScreen(
-                            canInsertIntoScene = state.currentProject != null,
-                            onClose = vm::closeDrawingStudio,
-                            onExportImage = { file, mime ->
-                                shareFile(file, mime, "Экспорт рисунка")
-                            },
-                            onInsertDrawingIntoScene = { file ->
-                                vm.addDrawingObject(file)
-                            }
-                        )
-                    }
-
                     state.isScanningObject -> {
                         ObjectScannerScreen(
                             onCancel = vm::cancelObjectScan,
@@ -84,33 +76,28 @@ class MainActivity : ComponentActivity() {
                             onExportObj = { file ->
                                 shareFile(file, "text/plain", "Экспорт 3D-модели (.OBJ)")
                             },
-                            onOpenInArEditor = { vm.openScanInArEditor(scan) }
+                            onOpenInArEditor = vm::closeScannedObjectViewer
                         )
                     }
 
                     state.currentProject == null -> {
-                        ProjectsScreen(
-                            projects = state.projects,
-                            scannedObjects = state.scannedObjects,
-                            onStartObjectScan = vm::startObjectScan,
-                            onOpenDrawingStudio = vm::openDrawingStudio,
-                            onOpenScannedObject = vm::openScannedObject,
-                            onDeleteScannedObject = vm::deleteScannedObject,
-                            onOpenProject = vm::openProject,
-                            onCreateProject = vm::createProject,
-                            onDuplicateProject = vm::duplicateProject,
-                            onDeleteProject = vm::deleteProject
-                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = Color(0xFFD4AF37))
+                        }
                     }
 
                     else -> {
+                        // Launches straight into the Live Camera with ALL tools!
                         EditorScreen(
                             state = state,
-                            onBackToProjects = vm::closeProject,
                             onUndo = vm::undo,
                             onRedo = vm::redo,
                             onTogglePlay = vm::togglePlayMode,
-                            onToggleViewMode = vm::toggleViewMode,
                             onToggleSnap = vm::toggleSnap,
                             onToggleSheet = vm::toggleSheet,
                             onCloseSheet = vm::closeSheet,
@@ -118,10 +105,8 @@ class MainActivity : ComponentActivity() {
                             onSetTransformTool = vm::setTransformTool,
                             onNudgeObject = vm::nudgeSelectedObject,
                             onCameraMoved = vm::updateCameraPosition,
-                            onArPlacedChange = vm::setArPlaced,
                             onAddPrimitive = vm::addPrimitive,
                             onAddText = vm::addTextObject,
-                            onOpenDrawing = vm::openDrawingStudio,
                             onAddPrefab = vm::addStarterPrefab,
                             onImportGlb = {
                                 glbPicker.launch(
@@ -142,15 +127,11 @@ class MainActivity : ComponentActivity() {
                             onAddAction = vm::addActionToBehavior,
                             onDeleteAction = vm::deleteActionFromBehavior,
                             onTestBehavior = vm::testBehavior,
-                            onSwitchScene = vm::switchScene,
-                            onAddScene = vm::addScene,
-                            onDeleteScene = vm::deleteScene,
-                            onUpdateSceneSettings = vm::updateSceneSettings,
-                            onExportProject = {
-                                vm.exportCurrentProject { file ->
-                                    shareFile(file, "application/json", "Экспорт сцены Reality Composer")
-                                }
-                            }
+                            onStartObjectScan = vm::startObjectScan,
+                            onExportCameraImage = { file, mime ->
+                                shareFile(file, mime, "Экспорт снимка с камеры")
+                            },
+                            onShowMessage = vm::showBanner
                         )
                     }
                 }

@@ -30,7 +30,7 @@ data class EditorUiState(
     val currentProject: RealityProject? = null,
     val selectedObjectId: String? = null,
     val activeTool: TransformTool = TransformTool.MOVE,
-    val viewMode: ViewMode = ViewMode.EDITOR_3D,
+    val viewMode: ViewMode = ViewMode.AR_LIVE,
     val activeSheet: InspectorSheet = InspectorSheet.NONE,
     val snapEnabled: Boolean = true,
     val isPlaying: Boolean = false,
@@ -81,7 +81,19 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val loaded = repository.loadAllProjects()
             val scans = captureEngine.loadAllScans()
-            _uiState.update { it.copy(projects = loaded, scannedObjects = scans) }
+            val active = _uiState.value.currentProject ?: loaded.firstOrNull() ?: repository.createNewProject(
+                "NUR Камера",
+                AnchorType.HORIZONTAL
+            )
+            _uiState.update {
+                it.copy(
+                    projects = loaded,
+                    scannedObjects = scans,
+                    currentProject = active,
+                    selectedObjectId = it.selectedObjectId ?: active.activeScene.objects.firstOrNull()?.id,
+                    viewMode = ViewMode.AR_LIVE
+                )
+            }
         }
     }
 

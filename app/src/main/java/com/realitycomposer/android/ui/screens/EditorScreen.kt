@@ -1,13 +1,27 @@
 package com.realitycomposer.android.ui.screens
 
+import android.content.ContentValues
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas as AndroidCanvas
+import android.graphics.Paint as AndroidPaint
+import android.graphics.Path as AndroidPath
+import android.graphics.RectF
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -16,38 +30,65 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.realitycomposer.android.R
 import com.realitycomposer.android.model.*
 import com.realitycomposer.android.ui.panels.AddObjectSheet
 import com.realitycomposer.android.ui.panels.BehaviorsSheet
 import com.realitycomposer.android.ui.panels.PropertiesSheet
-import com.realitycomposer.android.ui.panels.ScenesSheet
 import com.realitycomposer.android.ui.theme.RcColors
 import com.realitycomposer.android.ui.viewport.ArLiveViewport
-import com.realitycomposer.android.ui.viewport.Editor3DViewport
 import com.realitycomposer.android.viewmodel.EditorUiState
+import java.io.File
+import java.io.FileOutputStream
+
+private data class LiveCameraStroke(
+    val points: List<Offset>,
+    val color: Color,
+    val width: Float
+)
+
+private val CameraDrawPalette = listOf(
+    Color(0xFFFFD60A),
+    Color(0xFFFFFFFF),
+    Color(0xFF0A84FF),
+    Color(0xFFFF453A),
+    Color(0xFF30D158),
+    Color(0xFFBF5AF2),
+    Color(0xFFFF9F0A),
+    Color(0xFF000000)
+)
 
 @Composable
 fun EditorScreen(
     state: EditorUiState,
-    onBackToProjects: () -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onTogglePlay: () -> Unit,
-    onToggleViewMode: () -> Unit,
     onToggleSnap: () -> Unit,
     onToggleSheet: (InspectorSheet) -> Unit,
     onCloseSheet: () -> Unit,
@@ -55,10 +96,8 @@ fun EditorScreen(
     onSetTransformTool: (TransformTool) -> Unit,
     onNudgeObject: (Char, Float) -> Unit,
     onCameraMoved: (Vec3) -> Unit,
-    onArPlacedChange: (Boolean) -> Unit,
     onAddPrimitive: (ObjectType) -> Unit,
     onAddText: (String) -> Unit,
-    onOpenDrawing: () -> Unit,
     onAddPrefab: (String) -> Unit,
     onImportGlb: () -> Unit,
     onUpdateObject: (Boolean, (SceneObject) -> SceneObject) -> Unit,
@@ -70,94 +109,263 @@ fun EditorScreen(
     onAddAction: (String, ActionType) -> Unit,
     onDeleteAction: (String, String) -> Unit,
     onTestBehavior: (Behavior) -> Unit,
-    onSwitchScene: (String) -> Unit,
-    onAddScene: (String, AnchorType) -> Unit,
-    onDeleteScene: (String) -> Unit,
-    onUpdateSceneSettings: (Boolean?, Float?, AnchorType?) -> Unit,
-    onExportProject: () -> Unit
+    onStartObjectScan: () -> Unit,
+    onExportCameraImage: (File, String) -> Unit,
+    onShowMessage: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val project = state.currentProject ?: return
     val scene = state.activeScene ?: return
+
+    var useFrontCamera by remember { mutableStateOf(false) }
+    var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
+    var screenSize by remember { mutableStateOf(IntSize(1080, 1920)) }
+
+    // Live Drawing directly on top of the Camera!
+    var isDrawMode by remember { mutableStateOf(false) }
+    val drawStrokes = remember { mutableStateListOf<LiveCameraStroke>() }
+    var currentStrokePoints by remember { mutableStateOf<List<Offset>>(emptyList()) }
+    var activeBrushColor by remember { mutableStateOf(CameraDrawPalette[0]) }
+    var brushWidth by remember { mutableStateOf(10f) }
+    var showExportDialog by remember { mutableStateOf(false) }
+
+    fun captureAndExport(format: Bitmap.CompressFormat, ext: String) {
+        val w = screenSize.width.coerceAtLeast(720)
+        val h = screenSize.height.coerceAtLeast(1280)
+        val outBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = AndroidCanvas(outBmp)
+
+        val camBmp = previewViewRef?.bitmap
+        if (camBmp != null) {
+            canvas.drawBitmap(camBmp, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), null)
+        } else {
+            canvas.drawColor(android.graphics.Color.BLACK)
+        }
+
+        for (stroke in drawStrokes) {
+            if (stroke.points.isEmpty()) continue
+            val paint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+                color = stroke.color.toArgb()
+                strokeWidth = stroke.width
+                style = AndroidPaint.Style.STROKE
+                strokeCap = AndroidPaint.Cap.ROUND
+                strokeJoin = AndroidPaint.Join.ROUND
+            }
+            if (stroke.points.size == 1) {
+                paint.style = AndroidPaint.Style.FILL
+                canvas.drawCircle(stroke.points[0].x, stroke.points[0].y, stroke.width / 2f, paint)
+            } else {
+                val p = AndroidPath().apply {
+                    moveTo(stroke.points[0].x, stroke.points[0].y)
+                    for (i in 1 until stroke.points.size) lineTo(stroke.points[i].x, stroke.points[i].y)
+                }
+                canvas.drawPath(p, paint)
+            }
+        }
+
+        val fileName = "NUR_Camera_${System.currentTimeMillis()}.$ext"
+        val exportsDir = File(context.filesDir, "exports").apply { mkdirs() }
+        val file = File(exportsDir, fileName)
+        FileOutputStream(file).use { out -> outBmp.compress(format, 95, out) }
+
+        val mime = if (ext == "png") "image/png" else "image/jpeg"
+        saveCameraShotToGallery(context, outBmp, fileName, format, mime)
+        onShowMessage("Сохранено в Галерею: $fileName")
+        onExportCameraImage(file, mime)
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(RcColors.Background)
+            .background(Color.Black)
             .statusBarsPadding()
             .navigationBarsPadding()
+            .onSizeChanged { screenSize = it }
     ) {
-        // 1. Main 3D / AR Viewport
-        if (state.viewMode == ViewMode.EDITOR_3D) {
-            Editor3DViewport(
-                scene = scene,
-                selectedObjectId = state.selectedObjectId,
-                isPlaying = state.isPlaying,
-                onSelectObject = onSelectObject,
-                onCameraMoved = onCameraMoved,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            ArLiveViewport(
-                scene = scene,
-                selectedObjectId = state.selectedObjectId,
-                isPlaying = state.isPlaying,
-                arPlaced = state.arPlaced,
-                onArPlacedChange = onArPlacedChange,
-                onSelectObject = onSelectObject,
-                onCameraMoved = onCameraMoved,
-                modifier = Modifier.fillMaxSize()
-            )
+        // 1. Live Camera + Transparent 3D Filament Objects Viewport
+        ArLiveViewport(
+            scene = scene,
+            selectedObjectId = state.selectedObjectId,
+            isPlaying = state.isPlaying,
+            useFrontCamera = useFrontCamera,
+            onPreviewViewReady = { previewViewRef = it },
+            onSelectObject = onSelectObject,
+            onCameraMoved = onCameraMoved,
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // 2. Live Finger Drawing Layer directly on top of Camera + 3D!
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (isDrawMode) {
+                        Modifier.pointerInput(activeBrushColor, brushWidth) {
+                            detectDragGestures(
+                                onDragStart = { offset -> currentStrokePoints = listOf(offset) },
+                                onDrag = { change, _ ->
+                                    change.consume()
+                                    currentStrokePoints = currentStrokePoints + change.position
+                                },
+                                onDragEnd = {
+                                    if (currentStrokePoints.isNotEmpty()) {
+                                        drawStrokes.add(
+                                            LiveCameraStroke(currentStrokePoints, activeBrushColor, brushWidth)
+                                        )
+                                    }
+                                    currentStrokePoints = emptyList()
+                                },
+                                onDragCancel = { currentStrokePoints = emptyList() }
+                            )
+                        }
+                    } else Modifier
+                )
+        ) {
+            fun drawOne(pts: List<Offset>, col: Color, w: Float) {
+                if (pts.size == 1) {
+                    drawCircle(col, w / 2f, pts[0])
+                } else if (pts.size > 1) {
+                    val p = Path().apply {
+                        moveTo(pts[0].x, pts[0].y)
+                        for (i in 1 until pts.size) lineTo(pts[i].x, pts[i].y)
+                    }
+                    drawPath(p, col, style = Stroke(w, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                }
+            }
+            for (s in drawStrokes) drawOne(s.points, s.color, s.width)
+            if (currentStrokePoints.isNotEmpty()) drawOne(currentStrokePoints, activeBrushColor, brushWidth)
         }
 
-        // 2. Top Reality Composer Toolbar
-        TopEditorToolbar(
+        // 3. Top Camera-Only Toolbar with ALL Tools
+        TopCameraToolbar(
             state = state,
-            onBack = onBackToProjects,
+            isDrawMode = isDrawMode,
+            onToggleDraw = {
+                isDrawMode = !isDrawMode
+                if (isDrawMode) onCloseSheet()
+            },
             onUndo = onUndo,
             onRedo = onRedo,
-            onTogglePlay = onTogglePlay,
-            onToggleViewMode = onToggleViewMode,
+            onTogglePlay = {
+                isDrawMode = false
+                onTogglePlay()
+            },
             onToggleSnap = onToggleSnap,
-            onToggleSheet = onToggleSheet,
-            onOpenDrawing = onOpenDrawing,
-            onExportProject = onExportProject,
+            onToggleSheet = { sheet ->
+                isDrawMode = false
+                onToggleSheet(sheet)
+            },
+            onSwitchCamera = { useFrontCamera = !useFrontCamera },
+            onStartObjectScan = onStartObjectScan,
+            onOpenExport = { showExportDialog = true },
             modifier = Modifier.align(Alignment.TopCenter)
         )
 
-        // 3. Scene HUD Pill (Top-Left below toolbar)
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(top = 64.dp, start = 12.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(RcColors.SurfaceTranslucent)
-                .border(1.dp, RcColors.Border.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Box(
+        // 4. NUR Brand + Author Badge (Top-Left below toolbar)
+        if (!isDrawMode) {
+            Row(
                 modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(if (state.isPlaying) RcColors.PlayGreen else RcColors.AccentBlue)
-            )
-            Text(
-                text = if (state.isPlaying) "ИГРАТЬ • ${scene.name}" else "${scene.name} • ${scene.anchorType.displayNameRu}",
-                color = RcColors.TextPrimary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
-            )
+                    .align(Alignment.TopStart)
+                    .padding(top = 60.dp, start = 12.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.62f))
+                    .border(1.dp, Color(0xFFD4AF37).copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.ic_launcher_logo),
+                    contentDescription = "NUR",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                )
+                Text(
+                    text = if (state.isPlaying) "NUR • ИГРАТЬ" else "NUR • Автор: Sanzhar",
+                    color = Color(0xFFD4AF37),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
 
-        // 4. Status Toast Banner
+        // 5. Drawing Palette & Brush Size Bar (when Draw Mode is ON)
+        if (isDrawMode) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 58.dp, start = 12.dp, end = 12.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.Black.copy(alpha = 0.78f))
+                    .border(1.dp, RcColors.AccentBlue.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        items(CameraDrawPalette) { col ->
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(col)
+                                    .border(
+                                        width = if (activeBrushColor == col) 2.5.dp else 1.dp,
+                                        color = if (activeBrushColor == col) RcColors.AccentBlue else Color.White.copy(alpha = 0.4f),
+                                        shape = CircleShape
+                                    )
+                                    .clickable { activeBrushColor = col }
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = { if (drawStrokes.isNotEmpty()) drawStrokes.removeAt(drawStrokes.lastIndex) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Отменить", tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(
+                        onClick = { drawStrokes.clear() },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.DeleteSweep, contentDescription = "Очистить", tint = RcColors.DangerRed, modifier = Modifier.size(18.dp))
+                    }
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Кисть", color = RcColors.TextSecondary, fontSize = 11.sp)
+                    Slider(
+                        value = brushWidth,
+                        onValueChange = { brushWidth = it },
+                        valueRange = 4f..34f,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(24.dp),
+                        colors = SliderDefaults.colors(thumbColor = activeBrushColor, activeTrackColor = activeBrushColor)
+                    )
+                    Text("${brushWidth.toInt()}px", color = Color.White, fontSize = 11.sp)
+                }
+            }
+        }
+
+        // 6. Status Toast Banner
         AnimatedVisibility(
             visible = state.statusBanner != null,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 64.dp)
+                .padding(top = if (isDrawMode) 156.dp else 98.dp)
         ) {
             state.statusBanner?.let { msg ->
                 Box(
@@ -177,8 +385,8 @@ fun EditorScreen(
             }
         }
 
-        // 5. Bottom Controls (only when no sheet is open and not playing)
-        if (state.activeSheet == InspectorSheet.NONE && !state.isPlaying) {
+        // 7. Bottom Object Selector & Axis Controls (hidden when sheet open, playing, or drawing)
+        if (state.activeSheet == InspectorSheet.NONE && !state.isPlaying && !isDrawMode) {
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -187,7 +395,6 @@ fun EditorScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Quick Object Hierarchy Chips
                 if (scene.objects.isNotEmpty()) {
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -229,7 +436,6 @@ fun EditorScreen(
                     }
                 }
 
-                // Precision X / Y / Z Axis Gizmo Bar when an object is selected
                 if (state.selectedObject != null) {
                     AxisGizmoControlBar(
                         activeTool = state.activeTool,
@@ -241,7 +447,7 @@ fun EditorScreen(
             }
         }
 
-        // 6. Sliding Inspector Sheets
+        // 8. Sliding Inspector Sheets (Add 3D Object, Properties + Text on Object, Behaviors)
         AnimatedVisibility(
             visible = state.activeSheet != InspectorSheet.NONE,
             enter = slideInVertically(initialOffsetY = { it }),
@@ -252,7 +458,10 @@ fun EditorScreen(
                 InspectorSheet.ADD_OBJECT -> AddObjectSheet(
                     onAddPrimitive = onAddPrimitive,
                     onAddText = onAddText,
-                    onOpenDrawing = onOpenDrawing,
+                    onOpenDrawing = {
+                        onCloseSheet()
+                        isDrawMode = true
+                    },
                     onAddPrefab = onAddPrefab,
                     onImportGlb = onImportGlb,
                     onClose = onCloseSheet
@@ -275,32 +484,58 @@ fun EditorScreen(
                     onTestBehavior = onTestBehavior,
                     onClose = onCloseSheet
                 )
-                InspectorSheet.SCENES -> ScenesSheet(
-                    project = project,
-                    onSwitchScene = onSwitchScene,
-                    onAddScene = onAddScene,
-                    onDeleteScene = onDeleteScene,
-                    onUpdateSettings = onUpdateSceneSettings,
-                    onClose = onCloseSheet
-                )
-                InspectorSheet.NONE -> Unit
+                else -> Unit
             }
+        }
+
+        // 9. Export PNG / JPG Dialog
+        if (showExportDialog) {
+            AlertDialog(
+                onDismissRequest = { showExportDialog = false },
+                containerColor = RcColors.Surface,
+                title = { Text("Сохранить в PNG / JPG", color = Color.White, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        text = "Сохранит кадр с камеры вместе с рисунками в Галерею телефона (Pictures/RealityComposer) и откроет меню «Поделиться».",
+                        color = RcColors.TextSecondary,
+                        fontSize = 13.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showExportDialog = false
+                            captureAndExport(Bitmap.CompressFormat.PNG, "png")
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = RcColors.AccentBlue)
+                    ) { Text("Сохранить PNG") }
+                },
+                dismissButton = {
+                    OutlinedButton(
+                        onClick = {
+                            showExportDialog = false
+                            captureAndExport(Bitmap.CompressFormat.JPEG, "jpg")
+                        }
+                    ) { Text("Сохранить JPG", color = Color.White) }
+                }
+            )
         }
     }
 }
 
 @Composable
-private fun TopEditorToolbar(
+private fun TopCameraToolbar(
     state: EditorUiState,
-    onBack: () -> Unit,
+    isDrawMode: Boolean,
+    onToggleDraw: () -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onTogglePlay: () -> Unit,
-    onToggleViewMode: () -> Unit,
     onToggleSnap: () -> Unit,
     onToggleSheet: (InspectorSheet) -> Unit,
-    onOpenDrawing: () -> Unit,
-    onExportProject: () -> Unit,
+    onSwitchCamera: () -> Unit,
+    onStartObjectScan: () -> Unit,
+    onOpenExport: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -313,31 +548,42 @@ private fun TopEditorToolbar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
+        // Add 3D Object / Text / GLB
         ToolbarIconButton(
-            icon = Icons.AutoMirrored.Filled.ArrowBack,
-            label = "Проекты",
-            active = false,
-            onClick = onBack
+            icon = Icons.Default.Add,
+            label = "3D",
+            active = state.activeSheet == InspectorSheet.ADD_OBJECT,
+            enabled = !state.isPlaying,
+            onClick = { onToggleSheet(InspectorSheet.ADD_OBJECT) }
         )
 
+        // Draw directly on Camera
         ToolbarIconButton(
-            icon = Icons.AutoMirrored.Filled.Undo,
-            label = null,
-            active = false,
-            enabled = state.canUndo && !state.isPlaying,
-            onClick = onUndo
-        )
-        ToolbarIconButton(
-            icon = Icons.AutoMirrored.Filled.Redo,
-            label = null,
-            active = false,
-            enabled = state.canRedo && !state.isPlaying,
-            onClick = onRedo
+            icon = Icons.Default.Brush,
+            label = if (isDrawMode) "Готово" else "Рисовать",
+            active = isDrawMode,
+            enabled = !state.isPlaying,
+            onClick = onToggleDraw
         )
 
-        Spacer(Modifier.width(4.dp))
+        // Properties (Text on Object, Color, Size, Physics)
+        ToolbarIconButton(
+            icon = Icons.Default.Tune,
+            label = "Свойства",
+            active = state.activeSheet == InspectorSheet.PROPERTIES,
+            enabled = !state.isPlaying,
+            onClick = { onToggleSheet(InspectorSheet.PROPERTIES) }
+        )
 
-        // Play / Stop Button
+        // Export PNG / JPG
+        ToolbarIconButton(
+            icon = Icons.Default.SaveAlt,
+            label = "PNG/JPG",
+            active = false,
+            onClick = onOpenExport
+        )
+
+        // Play / Stop Physics & Behaviors
         Button(
             onClick = onTogglePlay,
             colors = ButtonDefaults.buttonColors(
@@ -362,40 +608,7 @@ private fun TopEditorToolbar(
             )
         }
 
-        // AR Camera / 3D Toggle
-        ToolbarIconButton(
-            icon = if (state.viewMode == ViewMode.AR_LIVE) Icons.Default.ViewInAr else Icons.Default.CameraAlt,
-            label = if (state.viewMode == ViewMode.AR_LIVE) "AR Камера" else "Камера AR",
-            active = state.viewMode == ViewMode.AR_LIVE,
-            onClick = onToggleViewMode
-        )
-
-        Spacer(Modifier.width(4.dp))
-
-        ToolbarIconButton(
-            icon = Icons.Default.GridOn,
-            label = null,
-            active = state.snapEnabled,
-            enabled = !state.isPlaying,
-            onClick = onToggleSnap
-        )
-
-        ToolbarIconButton(
-            icon = Icons.Default.Add,
-            label = null,
-            active = state.activeSheet == InspectorSheet.ADD_OBJECT,
-            enabled = !state.isPlaying,
-            onClick = { onToggleSheet(InspectorSheet.ADD_OBJECT) }
-        )
-
-        ToolbarIconButton(
-            icon = Icons.Default.Brush,
-            label = "Рисовать",
-            active = false,
-            enabled = !state.isPlaying,
-            onClick = onOpenDrawing
-        )
-
+        // Behaviors
         ToolbarIconButton(
             icon = Icons.Default.Bolt,
             label = "Поведения",
@@ -404,27 +617,44 @@ private fun TopEditorToolbar(
             onClick = { onToggleSheet(InspectorSheet.BEHAVIORS) }
         )
 
+        // 360° 3D Object Scanner
         ToolbarIconButton(
-            icon = Icons.Default.Tune,
-            label = "Свойства",
-            active = state.activeSheet == InspectorSheet.PROPERTIES,
+            icon = Icons.Default.CameraAlt,
+            label = "3D-Скан",
+            active = false,
             enabled = !state.isPlaying,
-            onClick = { onToggleSheet(InspectorSheet.PROPERTIES) }
+            onClick = onStartObjectScan
         )
 
+        // Switch Back / Front Camera
         ToolbarIconButton(
-            icon = Icons.Default.Layers,
-            label = "Сцены",
-            active = state.activeSheet == InspectorSheet.SCENES,
-            enabled = !state.isPlaying,
-            onClick = { onToggleSheet(InspectorSheet.SCENES) }
-        )
-
-        ToolbarIconButton(
-            icon = Icons.Default.Share,
+            icon = Icons.Default.Cameraswitch,
             label = null,
             active = false,
-            onClick = onExportProject
+            onClick = onSwitchCamera
+        )
+
+        // Snap, Undo, Redo
+        ToolbarIconButton(
+            icon = Icons.Default.GridOn,
+            label = null,
+            active = state.snapEnabled,
+            enabled = !state.isPlaying,
+            onClick = onToggleSnap
+        )
+        ToolbarIconButton(
+            icon = Icons.AutoMirrored.Filled.Undo,
+            label = null,
+            active = false,
+            enabled = state.canUndo && !state.isPlaying,
+            onClick = onUndo
+        )
+        ToolbarIconButton(
+            icon = Icons.AutoMirrored.Filled.Redo,
+            label = null,
+            active = false,
+            enabled = state.canRedo && !state.isPlaying,
+            onClick = onRedo
         )
     }
 }
@@ -437,10 +667,7 @@ private fun ToolbarIconButton(
     enabled: Boolean = true,
     onClick: () -> Unit
 ) {
-    val bg = when {
-        active -> RcColors.AccentBlue
-        else -> RcColors.SurfaceElevated
-    }
+    val bg = if (active) RcColors.AccentBlue else RcColors.SurfaceElevated
     val fg = when {
         !enabled -> RcColors.TextTertiary
         active -> Color.White
@@ -486,7 +713,6 @@ private fun AxisGizmoControlBar(
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Mode tabs: Move / Rotate / Scale + Properties shortcut
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -515,11 +741,10 @@ private fun AxisGizmoControlBar(
                 onClick = onOpenProperties,
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
             ) {
-                Text("Инспектор", color = RcColors.AccentBlue, fontSize = 12.sp)
+                Text("Текст / Свойства", color = RcColors.AccentBlue, fontSize = 12.sp)
             }
         }
 
-        // X / Y / Z Nudge Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
@@ -553,6 +778,35 @@ private fun AxisNudgePair(
         Text(axis, color = color, fontWeight = FontWeight.Bold, fontSize = 12.sp)
         IconButton(onClick = onPlus, modifier = Modifier.size(26.dp)) {
             Icon(Icons.Default.Add, contentDescription = "+$axis", tint = Color.White, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+private fun saveCameraShotToGallery(
+    context: Context,
+    bitmap: Bitmap,
+    displayName: String,
+    format: Bitmap.CompressFormat,
+    mimeType: String
+) {
+    runCatching {
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+            put(MediaStore.Images.Media.MIME_TYPE, mimeType)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/RealityComposer")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+        }
+        val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            ?: return
+        context.contentResolver.openOutputStream(uri)?.use { out ->
+            bitmap.compress(format, 95, out)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            context.contentResolver.update(uri, values, null, null)
         }
     }
 }
